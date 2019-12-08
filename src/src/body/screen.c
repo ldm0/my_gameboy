@@ -27,7 +27,8 @@
 #define VBLANK_CYCLES 114
 #define VBLANK_TIMES 10
 
-//#define MDEBUG
+// My Debug LOL
+#define MDEBUG
 
 uint8_t LCDC;
 uint8_t STAT;
@@ -44,13 +45,14 @@ uint8_t WX;
 
 static uint8_t * ram;
 static uint32_t screen_buffer[SCREEN_BUFFER_SQUARE_WIDTH * SCREEN_BUFFER_SQUARE_WIDTH];
+enum SCREEN_STATE {
+    SCREEN_STATE_HBLANK,
+    SCREEN_STATE_VBLANK,
+    SCREEN_STATE_OAM_SEARCH,
+    SCREEN_STATE_PIXEL_TRANSFER,
+};
 static struct {
-    enum {
-        SCREEN_STATE_HBLANK,
-        SCREEN_STATE_VBLANK,
-        SCREEN_STATE_OAM_SEARCH,
-        SCREEN_STATE_PIXEL_TRANSFER,
-    } state_next;
+    enum SCREEN_STATE state_next;
     int cycles_remain;
     // do a copy here in case they changes between pixel transfer and screen mapping
     // we do this compensation because our screen is not implemented like GB screen and draw line by line
@@ -66,6 +68,7 @@ int my_gb_screen_construct(WNDPROC callback)
     screen_context.line_current = 0;
 	if (scg_create_window(
 #ifdef MDEBUG
+        // When debug, show full screen buffer.
 		SCREEN_BUFFER_SQUARE_WIDTH * SCALE_RATIO,
 		SCREEN_BUFFER_SQUARE_WIDTH * SCALE_RATIO,
 #else
@@ -130,7 +133,7 @@ static inline uint32_t color_translate(uint16_t tile_line, uint8_t bit_index)
  *  So refresh rate is 1024 * 1024 / 17556 = 59.7275.
  */
 
-static void _oam_search()
+static void _oam_search(uint8_t line_current)
 {
 	// Change LCDC STAT mode to 2
 	STAT = (STAT & (~0x3)) | 0x2;
@@ -156,7 +159,7 @@ static void _oam_search()
 
 }
 
-static void _pixel_transfer()
+static void _pixel_transfer(uint8_t line_current)
 {
 
     screen_context.SCX_pixel_transfer = SCX;
@@ -272,12 +275,30 @@ static void _v_blank(uint8_t line_currrent)
 
 	// if bit 4(v blank interruption is enabled)
 	if ((STAT << 3) >> 4)
-		my_gb_cpu_on_interruption(SCREEN_STATE_VBLANK);
+		my_gb_cpu_on_interruption(INT_VBLANK);
 
     // change LY
     LY = line_currrent;
 }
 
+#ifdef MDEBUG
+// When debug, show full screen buffer.
+static void _screen_mapping(void)
+{
+    for (uint32_t y = 0; y < SCREEN_BUFFER_SQUARE_WIDTH; ++y) {
+        for (uint32_t x = 0; x < SCREEN_BUFFER_SQUARE_WIDTH; ++x) {
+            uint32_t color = screen_buffer[x + y * SCREEN_BUFFER_SQUARE_WIDTH];
+            for (uint32_t px_y = 0; px_y < SCALE_RATIO; ++px_y) {
+                for (uint32_t px_x = 0; px_x < SCALE_RATIO; ++px_x) {
+                    scg_back_buffer[px_x + x * SCALE_RATIO + px_y + (y * SCALE_RATIO) * (SCREEN_BUFFER_SQUARE_WIDTH * SCALE_RATIO)] = color;
+                }
+            }
+        }
+    }
+
+    scg_refresh();
+}
+#else
 // put gameboy screen buffer to back buffer and swap buffer
 // currently not refresh gameboy line by line 
 // actually for reducing Bitblt count, 
@@ -285,7 +306,7 @@ static void _v_blank(uint8_t line_currrent)
 // may try to use fresh line by line in the future
 static void _screen_mapping(void)
 {
-	// copy screen buffer to windows dib buffer
+	// copy screen buffer to windows dib(device independent bitmaps) buffer
     // (according to SCX and SCY map pixels from 256 * 256 to 160 * 144)
     for (uint32_t y = 0; y < GAMEBOY_SCREEN_HEIGHT; ++y) {
         for (uint32_t x = 0; x < GAMEBOY_SCREEN_WIDTH; ++x) {
@@ -303,22 +324,7 @@ static void _screen_mapping(void)
 
 	scg_refresh();
 }
-
-static void _debug_screen_mapping(void)
-{
-    for (uint32_t y = 0; y < SCREEN_BUFFER_SQUARE_WIDTH; ++y) {
-        for (uint32_t x = 0; x < SCREEN_BUFFER_SQUARE_WIDTH; ++x) {
-            uint32_t color = screen_buffer[x + y * SCREEN_BUFFER_SQUARE_WIDTH];
-            for (uint32_t px_y = 0; px_y < SCALE_RATIO; ++px_y) {
-                for (uint32_t px_x = 0; px_x < SCALE_RATIO; ++px_x) {
-                    scg_back_buffer[px_x + x * SCALE_RATIO + px_y + (y * SCALE_RATIO) * (SCREEN_BUFFER_SQUARE_WIDTH * SCALE_RATIO)] = color;
-                }
-            }
-        }
-    }
-
-    scg_refresh();
-}
+#endif
 
 uint32_t my_gb_screen_run(uint32_t cycles_want)
 {
@@ -330,7 +336,7 @@ uint32_t my_gb_screen_run(uint32_t cycles_want)
                 cycles += HBLANK_CYCLES;
                 _h_blank(screen_context.line_current);
                 ++screen_context.line_current;
-                if (screen_context.line_current > 143) {
+                if (screen_context.line_current > GAMEBOY_SCREEN_HEIGHT - 1) {
                     screen_context.state_next = SCREEN_STATE_VBLANK;
                 } else {
                     screen_context.state_next = SCREEN_STATE_OAM_SEARCH;
@@ -343,11 +349,7 @@ uint32_t my_gb_screen_run(uint32_t cycles_want)
                 if (screen_context.line_current > 153) {
                     screen_context.state_next = SCREEN_STATE_OAM_SEARCH;
                     screen_context.line_current = 0;
-#ifdef MDEBUG
-                    _debug_screen_mapping();
-#else
                     _screen_mapping();
-#endif
                 } else {
                     screen_context.state_next = SCREEN_STATE_VBLANK;
                 }

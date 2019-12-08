@@ -1,26 +1,28 @@
-cmake_minimum_required(VERSION 2.6)
-project(my_gameboy C)
+cmake_minimum_required(VERSION 3.0)
+project(my_gameboy_all)
 
-add_library(scg
-    dep/scg/scg.h
-    dep/scg/scg.c)
-add_library(cart
-    src/cart/cart.h
-    src/cart/cart.c)
-add_library(body
-    src/body/cpu.h
-    src/body/cpu.c
-    src/body/input.h
-    src/body/input.c
-    src/body/ram.h
-    src/body/ram.c
-    src/body/screen.h
-    src/body/screen.c
-    src/body/sound.h
-    src/body/sound.c)
-add_executable(my_gameboy
-    src/world.c)
-target_link_libraries(my_gameboy
-    scg
-    cart
-    body)
+# googletest module
+configure_file(gtest_cmake.txt googletest-download/CMakeLists.txt)
+execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+    RESULT_VARIABLE result
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/googletest-download )
+if(result)
+    message(FATAL_ERROR "CMake step for googletest failed: ${result}")
+endif()
+
+execute_process(COMMAND ${CMAKE_COMMAND} --build .
+    RESULT_VARIABLE result
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/googletest-download )
+if(result)
+    message(FATAL_ERROR "Build step for googletest failed: ${result}")
+endif()
+
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+add_subdirectory(
+    ${CMAKE_BINARY_DIR}/googletest-src
+    ${CMAKE_BINARY_DIR}/googletest-build
+    EXCLUDE_FROM_ALL)
+# end googletest module
+
+add_subdirectory(src)
+add_subdirectory(test)

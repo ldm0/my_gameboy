@@ -278,6 +278,7 @@ uint8_t MBC1_read(uint16_t address)
     }
     return result;
 }
+
 void MBC1_write(uint16_t address, uint8_t data)
 {
     if (address < 0x1FFF) {
